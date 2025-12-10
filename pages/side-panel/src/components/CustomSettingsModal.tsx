@@ -35,6 +35,10 @@ export const CustomSettingsModal: React.FC<CustomSettingsModalProps> = ({ isOpen
   const [replanningFrequency, setReplanningFrequency] = useState(3);
   const [pageLoadWait, setPageLoadWait] = useState(250);
   const [replayTasks, setReplayTasks] = useState(false);
+  // Phase 4 Settings
+  const [maxTabs, setMaxTabs] = useState(5);
+  const [enableValidator, setEnableValidator] = useState(true);
+  const [requireApproval, setRequireApproval] = useState(true);
 
   // Provider Management State
   const [providers, setProviders] = useState<Record<string, ProviderConfig>>({});
@@ -72,6 +76,11 @@ export const CustomSettingsModal: React.FC<CustomSettingsModalProps> = ({ isOpen
       setPageLoadWait(genSettings.minWaitPageLoad);
       setReplayTasks(genSettings.replayHistoricalTasks);
 
+      // Load Phase 4 settings (check for undefined in case of old storage)
+      if (genSettings.maxTabs !== undefined) setMaxTabs(genSettings.maxTabs);
+      if (genSettings.enableValidator !== undefined) setEnableValidator(genSettings.enableValidator);
+      if (genSettings.requireApproval !== undefined) setRequireApproval(genSettings.requireApproval);
+
       // Load providers
       const allProviders = await llmProviderStore.getAllProviders();
       setProviders(allProviders);
@@ -101,9 +110,7 @@ export const CustomSettingsModal: React.FC<CustomSettingsModalProps> = ({ isOpen
   // Save general settings
   const saveGeneralSetting = async (key: string, value: any) => {
     try {
-      const current = await generalSettingsStore.getSettings();
-      await generalSettingsStore.setSettings({
-        ...current,
+      await generalSettingsStore.updateSettings({
         [key]: value,
       });
     } catch (error) {
@@ -475,6 +482,64 @@ export const CustomSettingsModal: React.FC<CustomSettingsModalProps> = ({ isOpen
                       onChange={e => {
                         setReplayTasks(e.target.checked);
                         saveGeneralSetting('replayHistoricalTasks', e.target.checked);
+                      }}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="section-title" style={{ marginTop: '20px' }}>
+                Phases 2-4: Advanced Agent Capabilities
+              </div>
+              <div className="glass-panel p-4 mb-4">
+                <div className="form-row">
+                  <div>
+                    <div className="label-text">Max Concurrent Tabs (Phase 4)</div>
+                    <div className="label-desc">Maximum number of tabs agent can use simultaneously</div>
+                  </div>
+                  <input
+                    type="number"
+                    className="input-number"
+                    min="1"
+                    max="10"
+                    value={maxTabs}
+                    onChange={e => {
+                      const val = Number(e.target.value);
+                      setMaxTabs(val);
+                      saveGeneralSetting('maxTabs', val);
+                    }}
+                  />
+                </div>
+                <div className="form-row">
+                  <div>
+                    <div className="label-text">Enable Validator Agent (Phase 2)</div>
+                    <div className="label-desc">Self-correction and error detection</div>
+                  </div>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={enableValidator}
+                      onChange={e => {
+                        setEnableValidator(e.target.checked);
+                        saveGeneralSetting('enableValidator', e.target.checked);
+                      }}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+                <div className="form-row">
+                  <div>
+                    <div className="label-text">Require Approval (Phase 2)</div>
+                    <div className="label-desc">Ask for confirmation on sensitive actions</div>
+                  </div>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={requireApproval}
+                      onChange={e => {
+                        setRequireApproval(e.target.checked);
+                        saveGeneralSetting('requireApproval', e.target.checked);
                       }}
                     />
                     <span className="slider"></span>

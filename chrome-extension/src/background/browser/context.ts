@@ -357,4 +357,58 @@ export default class BrowserContext {
       await page.removeHighlight();
     }
   }
+
+  // ============================================
+  // PHASE 1: COOKIE MANAGEMENT METHODS
+  // ============================================
+
+  /**
+   * Get cookies from the current page
+   * @param name - Optional cookie name to get specific cookie
+   * @returns Array of cookies or single cookie if name is specified
+   */
+  public async getCookies(name?: string): Promise<chrome.cookies.Cookie[]> {
+    const page = await this.getCurrentPage();
+    const url = page.url();
+
+    if (name) {
+      const cookie = await chrome.cookies.get({ url, name });
+      return cookie ? [cookie] : [];
+    }
+
+    return await chrome.cookies.getAll({ url });
+  }
+
+  /**
+   * Set a cookie for the current page
+   * @param options - Cookie options (name, value, domain, path)
+   */
+  public async setCookie(options: { name: string; value: string; domain?: string; path?: string }): Promise<void> {
+    const page = await this.getCurrentPage();
+    const url = page.url();
+
+    // Parse URL to get domain if not provided
+    const urlObj = new URL(url);
+    const domain = options.domain || urlObj.hostname;
+
+    await chrome.cookies.set({
+      url,
+      name: options.name,
+      value: options.value,
+      domain,
+      path: options.path || '/',
+    });
+
+    logger.info(`Set cookie: ${options.name} = ${options.value}`);
+  }
+
+  public async sendEventToActiveTab(event: any): Promise<void> {
+    if (this._currentTabId) {
+      try {
+        await chrome.tabs.sendMessage(this._currentTabId, { type: 'AGENT_EVENT', payload: event });
+      } catch (error) {
+        // Content script might not be loaded yet, ignore
+      }
+    }
+  }
 }

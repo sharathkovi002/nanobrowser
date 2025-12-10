@@ -83,6 +83,7 @@ export class AgentContext {
       details: eventDetails,
     });
     await this.eventManager.emit(event);
+    await this.browserContext.sendEventToActiveTab(event);
   }
 
   async pause() {

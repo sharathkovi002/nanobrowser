@@ -15,7 +15,7 @@ export default withPageConfig({
   plugins: [isDev && makeEntryPointPlugin()],
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/index.ts'),
+      entry: resolve(__dirname, 'src/index.tsx'),
       formats: ['iife'],
       name: 'ContentScript',
       fileName: 'index',

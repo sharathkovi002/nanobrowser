@@ -13,7 +13,9 @@ import ChatHistoryList from './components/ChatHistoryList';
 import BookmarkList from './components/BookmarkList';
 import { CustomUI } from './components/CustomUI';
 import { CustomSettingsModal } from './components/CustomSettingsModal';
+import { TaskMonitor, type SubTask } from './components/TaskMonitor';
 import { EventType, type AgentEvent, ExecutionState } from './types/event';
+
 import './SidePanel.css';
 import './styles/custom-ui.css';
 
@@ -27,6 +29,9 @@ declare global {
 const SidePanel = () => {
   const progressMessage = 'Showing progress...';
   const [messages, setMessages] = useState<Message[]>([]);
+  const [subtasks, setSubtasks] = useState<SubTask[]>([]);
+  // Phase 2 Approval State
+  const [approvalRequest, setApprovalRequest] = useState<{ id: string; description: string } | null>(null);
   const [inputEnabled, setInputEnabled] = useState(true);
   const [showStopButton, setShowStopButton] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -161,9 +166,28 @@ const SidePanel = () => {
       switch (actor) {
         case Actors.SYSTEM:
           switch (state) {
+            case ExecutionState.SUBTASKS_GENERATED:
+              try {
+                const newSubtasks = JSON.parse(content || '[]');
+                setSubtasks(newSubtasks);
+              } catch (e) {
+                console.error('Failed to parse subtasks', e);
+              }
+              skip = true;
+              break;
+            case ExecutionState.APPROVAL_REQUESTED:
+              try {
+                const req = JSON.parse(content || '{}');
+                setApprovalRequest(req);
+              } catch (e) {
+                console.error('Failed to parse approval request', e);
+              }
+              skip = true;
+              break;
             case ExecutionState.TASK_START:
               // Reset historical session flag when a new task starts
               setIsHistoricalSession(false);
+              setSubtasks([]);
               break;
             case ExecutionState.TASK_OK:
               setIsFollowUpMode(true);
@@ -236,7 +260,7 @@ const SidePanel = () => {
               }
               break;
             case ExecutionState.ACT_OK:
-              skip = !isReplayingRef.current;
+              skip = false;
               break;
             case ExecutionState.ACT_FAIL:
               skip = false;
@@ -1003,6 +1027,17 @@ const SidePanel = () => {
     }
   };
 
+  const handleResolveApproval = (id: string, approved: boolean) => {
+    if (portRef.current) {
+      portRef.current.postMessage({
+        type: 'approval_response',
+        id,
+        approved,
+      });
+    }
+    setApprovalRequest(null);
+  };
+
   return (
     <div
       style={{
@@ -1033,10 +1068,15 @@ const SidePanel = () => {
 
       {/* Custom Glassmorphism UI */}
       <CustomUI
-        onSendMessage={handleSendMessage}
+        onSendMessage={text => {
+          handleSendMessage(text);
+        }}
         inputEnabled={inputEnabled && !isHistoricalSession}
         isRunning={!inputEnabled && showStopButton}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        subtasks={subtasks}
+        approvalRequest={approvalRequest}
+        onResolveApproval={handleResolveApproval}
       />
 
       {/* Custom Settings Modal with ALL Nanobrowser Settings */}

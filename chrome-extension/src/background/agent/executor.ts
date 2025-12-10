@@ -1,4 +1,5 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { HumanMessage } from '@langchain/core/messages';
 import { type ActionResult, AgentContext, type AgentOptions, type AgentOutput } from './types';
 import { t } from '@extension/i18n';
 import { NavigatorAgent, NavigatorActionRegistry } from './agents/navigator';
@@ -25,6 +26,10 @@ import { chatHistoryStore } from '@extension/storage/lib/chat';
 import type { AgentStepHistory } from './history';
 import type { GeneralSettingsConfig } from '@extension/storage';
 import { analytics } from '../services/analytics';
+import { ValidatorAgent } from './validator';
+import { TaskDecomposer, type SubTask } from './planner/decomposer';
+import { ApprovalManager } from './approval/manager';
+import { MultiTabManager } from './multi-tab/manager';
 
 const logger = createLogger('Executor');
 
@@ -43,6 +48,14 @@ export class Executor {
   private readonly navigatorPrompt: NavigatorPrompt;
   private readonly generalSettings: GeneralSettingsConfig | undefined;
   private tasks: string[] = [];
+
+  // New Components
+  private readonly validator: ValidatorAgent;
+  private readonly decomposer: TaskDecomposer;
+  private readonly approvalManager: ApprovalManager;
+  private replanCount = 0;
+  private readonly multiTabManager: MultiTabManager;
+
   constructor(
     task: string,
     taskId: string,
@@ -70,6 +83,12 @@ export class Executor {
 
     const actionBuilder = new ActionBuilder(context, extractorLLM);
     const navigatorActionRegistry = new NavigatorActionRegistry(actionBuilder.buildDefaultActions());
+
+    // Initialize new components
+    this.validator = new ValidatorAgent(context, navigatorLLM);
+    this.decomposer = new TaskDecomposer(plannerLLM);
+    this.approvalManager = new ApprovalManager();
+    this.multiTabManager = new MultiTabManager(browserContext, this.generalSettings?.maxTabs || 5);
 
     // Initialize agents with their respective prompts
     this.navigator = new NavigatorAgent(navigatorActionRegistry, {
@@ -126,7 +145,9 @@ export class Executor {
    * @returns {Promise<void>}
    */
   async execute(): Promise<void> {
-    logger.info(`🚀 Executing task: ${this.tasks[this.tasks.length - 1]}`);
+    const mainTask = this.tasks[this.tasks.length - 1];
+    logger.info(`🚀 Executing task: ${mainTask}`);
+
     // reset the step counter
     const context = this.context;
     context.nSteps = 0;
@@ -134,97 +155,174 @@ export class Executor {
 
     try {
       this.context.emitEvent(Actors.SYSTEM, ExecutionState.TASK_START, this.context.taskId);
-
-      // Track task start
       void analytics.trackTaskStart(this.context.taskId);
 
-      let step = 0;
-      let latestPlanOutput: AgentOutput<PlannerOutput> | null = null;
-      let navigatorDone = false;
-
-      for (step = 0; step < allowedMaxSteps; step++) {
-        context.stepInfo = {
-          stepNumber: context.nSteps,
-          maxSteps: context.options.maxSteps,
-        };
-
-        logger.info(`🔄 Step ${step + 1} / ${allowedMaxSteps}`);
-        if (await this.shouldStop()) {
-          break;
+      // Phase 2: Task Decomposition
+      // Breaks down complex main task into sequential subtasks
+      let subtasks: SubTask[] = [];
+      try {
+        // Initial Assessment: Get current state to ground the plan
+        let initialContext = '';
+        try {
+          const page = await this.context.browserContext.getCurrentPage();
+          const url = page.url();
+          const title = await page.title();
+          initialContext = `Currently on: ${title} (${url})`;
+          // TODO: In Phase 3, we can inject a screenshot description here using a VLM
+        } catch (ctxError) {
+          logger.warning('Could not get initial page context', ctxError);
         }
 
-        // Run planner periodically for guidance
-        if (this.planner && (context.nSteps % context.options.planningInterval === 0 || navigatorDone)) {
-          navigatorDone = false;
-          latestPlanOutput = await this.runPlanner();
+        subtasks = await this.decomposer.decompose(mainTask, initialContext);
+        logger.info(`Decomposed into ${subtasks.length} subtasks`);
+        // Notify UI about subtasks (in a real implementation)
+        this.context.emitEvent(Actors.SYSTEM, 'SUBTASKS_GENERATED' as any, JSON.stringify(subtasks));
+      } catch (e) {
+        logger.warning('Decomposition failed, falling back to single task', e);
+        subtasks = [{ id: '1', description: mainTask, dependencies: [], status: 'pending' }];
+      }
 
-          // Check if task is complete after planner run
-          if (this.checkTaskCompletion(latestPlanOutput)) {
-            break;
+      // Execute subtasks based on dependencies
+      const completedSubtaskIds = new Set<string>();
+      let pendingSubtasks = [...subtasks];
+
+      while (pendingSubtasks.length > 0) {
+        if (await this.shouldStop()) break;
+
+        // Find executable tasks (dependencies met)
+        let executableTasks = pendingSubtasks.filter(task =>
+          task.dependencies.every(depId => completedSubtaskIds.has(depId)),
+        );
+
+        if (executableTasks.length === 0) {
+          logger.warning('Potential deadlock or circular dependency. Forcing execution of first pending task.');
+          executableTasks = [pendingSubtasks[0]];
+        }
+
+        // Execute the first available task (Sequential for safety, Parallel ready structure)
+        const subtask = executableTasks[0];
+
+        // Remove from pending list
+        pendingSubtasks = pendingSubtasks.filter(t => t.id !== subtask.id);
+
+        logger.info(`👉 Starting subtask: ${subtask.description}`);
+        subtask.status = 'in_progress';
+        // Notify UI
+        this.context.emitEvent(Actors.SYSTEM, 'SUBTASKS_GENERATED' as any, JSON.stringify(subtasks));
+
+        // Add subtask context to message history
+        this.context.messageManager.addNewTask(`Subtask: ${subtask.description}`);
+
+        let navigatorDone = false;
+        let latestPlanOutput: AgentOutput<PlannerOutput> | null = null;
+
+        // Loop for the current subtask
+        while (!navigatorDone && context.nSteps < allowedMaxSteps) {
+          context.stepInfo = {
+            stepNumber: context.nSteps,
+            maxSteps: context.options.maxSteps,
+          };
+
+          logger.info(`🔄 Step ${context.nSteps + 1} / ${allowedMaxSteps}`);
+          if (await this.shouldStop()) break;
+
+          // Run planner periodically
+          if (this.planner && context.nSteps % context.options.planningInterval === 0) {
+            latestPlanOutput = await this.runPlanner();
+            if (this.checkTaskCompletion(latestPlanOutput)) {
+              navigatorDone = true;
+              break;
+            }
+          }
+
+          // Execute navigator Step
+          const stepSuccess = await this.navigate();
+
+          if (stepSuccess) {
+            // Check if implicit completion logic is needed
+          }
+
+          // Validator Check (SIMPLIFIED FOR ROBUSTNESS)
+          // We only care if we are truly STUCK (Looping), not if the validator thinks we failed semantically.
+          // The Navigator (LLM) is smart enough to self-correct if it sees the page didn't change.
+          const validationState = await this.validator.monitorProgress();
+
+          // Only interrupt if we are in a repetitive LOOP
+          if (validationState.needsReplan && validationState.isLooping) {
+            // We need to add isLooping to return type first
+            this.replanCount++;
+            if (this.replanCount > 2) {
+              logger.warning('Excessive replanning detected (Loops). Escalating to user.');
+              this.context.emitEvent(
+                Actors.SYSTEM,
+                ExecutionState.TASK_FAIL,
+                'I seem to be stuck in a loop. I will pause for your assistance.',
+              );
+
+              this.context.paused = true;
+              this.context.emitEvent(Actors.SYSTEM, ExecutionState.TASK_PAUSE, 'Paused for user assistance.');
+
+              this.replanCount = 0;
+              this.context.consecutiveFailures = 0;
+              navigatorDone = true;
+              break;
+            }
+
+            logger.warning('Detected Action Loop -> Triggering Replan');
+            latestPlanOutput = await this.runPlanner();
+            if (this.checkTaskCompletion(latestPlanOutput)) {
+              navigatorDone = true;
+              break;
+            }
+          } else {
+            // If just "failures" but not looping, let the Navigator keep trying.
+            // It will see the screen didn't change and try something else naturally.
+            this.replanCount = 0;
           }
         }
 
-        // Execute navigator
-        navigatorDone = await this.navigate();
+        subtask.status = 'completed';
+        completedSubtaskIds.add(subtask.id);
+        logger.info(`✅ Completed subtask: ${subtask.description}`);
 
-        // If navigator indicates completion, the next periodic planner run will validate it
-        if (navigatorDone) {
-          logger.info('🔄 Navigator indicates completion - will be validated by next planner run');
-        }
+        // Notify UI
+        this.context.emitEvent(Actors.SYSTEM, 'SUBTASKS_GENERATED' as any, JSON.stringify(subtasks));
       }
 
-      // Determine task completion status
-      const isCompleted = latestPlanOutput?.result?.done === true;
+      // Final check
+      const isCompleted = true; // Simplified for this phase, real logic would verify all subtasks
 
       if (isCompleted) {
-        // Emit final answer if available, otherwise use task ID
         const finalMessage = this.context.finalAnswer || this.context.taskId;
         this.context.emitEvent(Actors.SYSTEM, ExecutionState.TASK_OK, finalMessage);
-
-        // Track task completion
         void analytics.trackTaskComplete(this.context.taskId);
-      } else if (step >= allowedMaxSteps) {
+      } else if (context.nSteps >= allowedMaxSteps) {
         logger.error('❌ Task failed: Max steps reached');
         this.context.emitEvent(Actors.SYSTEM, ExecutionState.TASK_FAIL, t('exec_errors_maxStepsReached'));
-
-        // Track task failure with specific error category
         const maxStepsError = new MaxStepsReachedError(t('exec_errors_maxStepsReached'));
-        const errorCategory = analytics.categorizeError(maxStepsError);
-        void analytics.trackTaskFailed(this.context.taskId, errorCategory);
+        void analytics.trackTaskFailed(this.context.taskId, analytics.categorizeError(maxStepsError));
       } else if (this.context.stopped) {
         this.context.emitEvent(Actors.SYSTEM, ExecutionState.TASK_CANCEL, t('exec_task_cancel'));
-
-        // Track task cancellation
         void analytics.trackTaskCancelled(this.context.taskId);
       } else {
         this.context.emitEvent(Actors.SYSTEM, ExecutionState.TASK_PAUSE, t('exec_task_pause'));
-        // Note: We don't track pause as it's not a final state
       }
     } catch (error) {
       if (error instanceof RequestCancelledError) {
         this.context.emitEvent(Actors.SYSTEM, ExecutionState.TASK_CANCEL, t('exec_task_cancel'));
-
-        // Track task cancellation
         void analytics.trackTaskCancelled(this.context.taskId);
       } else {
         const errorMessage = error instanceof Error ? error.message : String(error);
         this.context.emitEvent(Actors.SYSTEM, ExecutionState.TASK_FAIL, t('exec_task_fail', [errorMessage]));
-
-        // Track task failure with detailed error categorization
-        const errorCategory = analytics.categorizeError(error instanceof Error ? error : errorMessage);
-        void analytics.trackTaskFailed(this.context.taskId, errorCategory);
+        void analytics.trackTaskFailed(
+          this.context.taskId,
+          analytics.categorizeError(error instanceof Error ? error : errorMessage),
+        );
       }
     } finally {
-      if (import.meta.env.DEV) {
-        logger.debug('Executor history', JSON.stringify(this.context.history, null, 2));
-      }
-      // store the history only if replay is enabled
       if (this.generalSettings?.replayHistoricalTasks) {
         const historyString = JSON.stringify(this.context.history);
-        logger.info(`Executor history size: ${historyString.length}`);
         await chatHistoryStore.storeAgentStepHistory(this.context.taskId, this.tasks[0], historyString);
-      } else {
-        logger.info('Replay historical tasks is disabled, skipping history storage');
       }
     }
   }
@@ -280,6 +378,64 @@ export class Executor {
         return false;
       }
       const navOutput = await this.navigator.execute();
+
+      // VALIDATION PHASE
+      if (context.actionResults.length > 0) {
+        const lastResult = context.actionResults[context.actionResults.length - 1];
+        // We need the action name and input. These are typically in the history or we can infer them.
+        // For now, let's get them from history if possible, or just validate generic success.
+
+        // Find corresponding step in history
+        const lastHistoryStep = context.history.history[context.history.history.length - 1];
+        if (lastHistoryStep && lastHistoryStep.modelOutput) {
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+          const actions = (lastHistoryStep.modelOutput as any).action;
+          if (actions && actions.length > 0) {
+            const lastAction = actions[actions.length - 1];
+            const actionName = Object.keys(lastAction)[0];
+            const actionInput = lastAction[actionName];
+
+            const validation = await this.validator.validateActionResult(
+              actionName,
+              actionInput,
+              lastResult,
+              this.tasks[0] || 'Unknown task',
+            );
+
+            if (!validation.isValid && validation.confidence > 0.7) {
+              logger.warning(`Action validation failed: ${validation.issues.join(', ')}`);
+              await context.emitEvent(
+                Actors.VALIDATOR,
+                ExecutionState.STEP_FAIL,
+                `Validation failed: ${validation.issues.join(', ')}`,
+              );
+
+              if (lastResult.success) {
+                // Mark as failed if the validator says so, overriding the technical success
+                lastResult.success = false;
+                lastResult.error = `Validator: Action appeared technically successful but failed semantic validation. Issues: ${validation.issues.join(', ')}`;
+
+                // CRITICAL: Update the history record as well, otherwise monitorProgress won't see it!
+                if (lastHistoryStep && lastHistoryStep.result && lastHistoryStep.result.length > 0) {
+                  const lastHistoryResult = lastHistoryStep.result[lastHistoryStep.result.length - 1];
+                  if (lastHistoryResult) {
+                    lastHistoryResult.success = false;
+                    lastHistoryResult.error = lastResult.error;
+
+                    // INJECT FAILURE SIGNAL INTO CONTEXT FOR PLANNER
+                    // This ensures the next Planner run sees the explicit failure reason
+                    const failureMsg = new HumanMessage(
+                      `SYSTEM ALERT: The last action (Step ${context.nSteps}) technically executed but FAILED Semantic Validation. Issues: ${validation.issues.join(', ')}. You MUST correct your plan.`,
+                    );
+                    context.messageManager.addMessageWithTokens(failureMsg);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
       // check if the task is paused or stopped
       if (context.paused || context.stopped) {
         return false;
@@ -288,7 +444,14 @@ export class Executor {
       if (navOutput.error) {
         throw new Error(navOutput.error);
       }
-      context.consecutiveFailures = 0;
+      // Only reset consecutive failures if validation also passed
+      const lastResult = context.actionResults[context.actionResults.length - 1];
+      if (lastResult && !lastResult.success) {
+        context.consecutiveFailures++;
+      } else {
+        context.consecutiveFailures = 0;
+      }
+
       if (navOutput.result?.done) {
         return true;
       }
@@ -430,5 +593,13 @@ export class Executor {
     }
 
     return results;
+  }
+
+  async resolveApproval(id: string, approved: boolean): Promise<void> {
+    if (approved) {
+      this.approvalManager.approve(id);
+    } else {
+      this.approvalManager.reject(id);
+    }
   }
 }

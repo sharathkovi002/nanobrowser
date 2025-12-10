@@ -55,6 +55,8 @@ Common action sequences:
 4. NAVIGATION & ERROR HANDLING:
 
 - If no suitable elements exist, use other functions to complete the task
+- If you cannot find the element index in the list but can see it in the screenshot, use 'click_coordinates' with the (x, y) coordinates derived from your visual understanding of the page.
+- If a previous 'click_element' action failed or wasn't validated, and you still see the element, try 'click_coordinates' as a fallback.
 - If stuck, try alternative approaches - like going back to a previous page, new search, new tab etc.
 - Handle popups/cookies by accepting or closing them
 - Use scroll to find elements you are looking for

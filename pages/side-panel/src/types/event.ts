@@ -40,6 +40,11 @@ export enum ExecutionState {
   ACT_START = 'act.start',
   ACT_OK = 'act.ok',
   ACT_FAIL = 'act.fail',
+
+  // Phase 3: Advanced States
+  SUBTASKS_GENERATED = 'system.subtasks',
+  APPROVAL_REQUESTED = 'system.approval',
+  VALIDATOR_CHECK = 'system.validator',
 }
 
 export interface EventData {

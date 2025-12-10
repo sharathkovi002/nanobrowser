@@ -213,3 +213,143 @@ export const waitActionSchema: ActionSchema = {
     seconds: z.number().int().default(3).describe('amount of seconds'),
   }),
 };
+
+// ============================================
+// PHASE 1: ENHANCED ACTIONS
+// ============================================
+
+// Advanced Mouse Actions
+export const hoverElementActionSchema: ActionSchema = {
+  name: 'hover_element',
+  description: 'Hover over an element to reveal dropdowns, tooltips, or hidden menus',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    index: z.number().int().describe('index of the element'),
+    xpath: z.string().nullable().optional().describe('xpath of the element'),
+    duration: z.number().int().default(500).describe('hover duration in milliseconds'),
+  }),
+};
+
+export const doubleClickElementActionSchema: ActionSchema = {
+  name: 'double_click_element',
+  description: 'Double-click an element',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    index: z.number().int().describe('index of the element'),
+    xpath: z.string().nullable().optional().describe('xpath of the element'),
+  }),
+};
+
+export const rightClickElementActionSchema: ActionSchema = {
+  name: 'right_click_element',
+  description: 'Right-click an element to open context menu',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    index: z.number().int().describe('index of the element'),
+    xpath: z.string().nullable().optional().describe('xpath of the element'),
+  }),
+};
+
+export const dragAndDropActionSchema: ActionSchema = {
+  name: 'drag_and_drop',
+  description: 'Drag an element and drop it onto another element',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    sourceIndex: z.number().int().describe('index of the source element to drag'),
+    targetIndex: z.number().int().describe('index of the target element to drop onto'),
+    sourceXpath: z.string().nullable().optional().describe('xpath of source element'),
+    targetXpath: z.string().nullable().optional().describe('xpath of target element'),
+  }),
+};
+
+export const clickCoordinatesActionSchema: ActionSchema = {
+  name: 'click_coordinates',
+  description: 'Click at specific x, y coordinates. Use this as a fallback when element selection fails.',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    x: z.number().int().describe('x coordinate'),
+    y: z.number().int().describe('y coordinate'),
+  }),
+};
+
+// File Upload Action
+export const uploadFileActionSchema: ActionSchema = {
+  name: 'upload_file',
+  description: 'Upload a file to a file input element',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    index: z.number().int().describe('index of the file input element'),
+    filePath: z.string().describe('path to the file to upload'),
+    xpath: z.string().nullable().optional().describe('xpath of the element'),
+  }),
+};
+
+// Keyboard Actions
+export const pressKeyActionSchema: ActionSchema = {
+  name: 'press_key',
+  description: 'Press a specific key or key combination (e.g., Enter, Escape, Control+C)',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    key: z.string().describe('key to press (e.g., Enter, Escape, Tab)'),
+    modifiers: z
+      .array(z.enum(['Control', 'Shift', 'Alt', 'Meta']))
+      .optional()
+      .describe('modifier keys to hold'),
+  }),
+};
+
+// Text Selection Actions
+export const selectTextActionSchema: ActionSchema = {
+  name: 'select_text',
+  description: 'Select text within an element',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    index: z.number().int().describe('index of the element'),
+    xpath: z.string().nullable().optional().describe('xpath of the element'),
+  }),
+};
+
+// Validation Actions
+export const assertVisibleActionSchema: ActionSchema = {
+  name: 'assert_visible',
+  description: 'Assert that an element is visible on the page',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    index: z.number().int().describe('index of the element'),
+    xpath: z.string().nullable().optional().describe('xpath of the element'),
+  }),
+};
+
+export const assertTextActionSchema: ActionSchema = {
+  name: 'assert_text',
+  description: 'Assert that an element contains specific text',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    index: z.number().int().describe('index of the element'),
+    expectedText: z.string().describe('expected text content'),
+    exact: z.boolean().default(false).describe('whether to match exactly or partially'),
+    xpath: z.string().nullable().optional().describe('xpath of the element'),
+  }),
+};
+
+// Cookie Management Actions
+export const getCookiesActionSchema: ActionSchema = {
+  name: 'get_cookies',
+  description: 'Get all cookies or a specific cookie by name',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    name: z.string().optional().describe('name of specific cookie to get'),
+  }),
+};
+
+export const setCookieActionSchema: ActionSchema = {
+  name: 'set_cookie',
+  description: 'Set a cookie with specified name and value',
+  schema: z.object({
+    intent: z.string().default('').describe('purpose of this action'),
+    name: z.string().describe('cookie name'),
+    value: z.string().describe('cookie value'),
+    domain: z.string().optional().describe('cookie domain'),
+    path: z.string().default('/').describe('cookie path'),
+  }),
+};

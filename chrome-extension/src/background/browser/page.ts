@@ -1334,6 +1334,265 @@ export default class Page {
     }
   }
 
+  // ============================================
+  // PHASE 1: ENHANCED BROWSER METHODS
+  // ============================================
+
+  /**
+   * Hover over an element
+   */
+  async hoverElementNode(elementNode: DOMElementNode): Promise<void> {
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer is not connected');
+    }
+
+    try {
+      const element = await this.locateElement(elementNode);
+      if (!element) {
+        throw new Error(`Element: ${elementNode} not found`);
+      }
+
+      await this._scrollIntoViewIfNeeded(element);
+      await element.hover();
+      logger.info('Hovered over element');
+    } catch (error) {
+      throw new Error(
+        `Failed to hover over element: ${elementNode}. Error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Double-click an element
+   */
+  async doubleClickElementNode(elementNode: DOMElementNode): Promise<void> {
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer is not connected');
+    }
+
+    try {
+      const element = await this.locateElement(elementNode);
+      if (!element) {
+        throw new Error(`Element: ${elementNode} not found`);
+      }
+
+      await this._scrollIntoViewIfNeeded(element);
+      await element.click({ clickCount: 2 });
+      await this._checkAndHandleNavigation();
+      logger.info('Double-clicked element');
+    } catch (error) {
+      if (error instanceof URLNotAllowedError) {
+        throw error;
+      }
+      throw new Error(
+        `Failed to double-click element: ${elementNode}. Error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Right-click an element
+   */
+  async rightClickElementNode(elementNode: DOMElementNode): Promise<void> {
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer is not connected');
+    }
+
+    try {
+      const element = await this.locateElement(elementNode);
+      if (!element) {
+        throw new Error(`Element: ${elementNode} not found`);
+      }
+
+      await this._scrollIntoViewIfNeeded(element);
+      await element.click({ button: 'right' });
+      logger.info('Right-clicked element');
+    } catch (error) {
+      throw new Error(
+        `Failed to right-click element: ${elementNode}. Error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Drag and drop from source to target element
+   */
+  async dragAndDropElements(sourceNode: DOMElementNode, targetNode: DOMElementNode): Promise<void> {
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer is not connected');
+    }
+
+    try {
+      const sourceElement = await this.locateElement(sourceNode);
+      const targetElement = await this.locateElement(targetNode);
+
+      if (!sourceElement) {
+        throw new Error(`Source element: ${sourceNode} not found`);
+      }
+      if (!targetElement) {
+        throw new Error(`Target element: ${targetNode} not found`);
+      }
+
+      // Get bounding boxes
+      const sourceBox = await sourceElement.boundingBox();
+      const targetBox = await targetElement.boundingBox();
+
+      if (!sourceBox || !targetBox) {
+        throw new Error('Could not get element positions');
+      }
+
+      // Perform drag and drop
+      await this._puppeteerPage.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+      await this._puppeteerPage.mouse.down();
+      await this._puppeteerPage.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, {
+        steps: 10,
+      });
+      await this._puppeteerPage.mouse.up();
+
+      logger.info('Drag and drop completed');
+    } catch (error) {
+      throw new Error(
+        `Failed to drag and drop elements. Error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Upload a file to a file input element
+   */
+  async uploadFile(elementNode: DOMElementNode, filePath: string): Promise<void> {
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer is not connected');
+    }
+
+    try {
+      const element = await this.locateElement(elementNode);
+      if (!element) {
+        throw new Error(`Element: ${elementNode} not found`);
+      }
+
+      // Verify it's a file input
+      const isFileInput = await element.evaluate(el => {
+        return el instanceof HTMLInputElement && el.type === 'file';
+      });
+
+      if (!isFileInput) {
+        throw new Error('Element is not a file input');
+      }
+
+      // Upload the file
+      await (element as ElementHandle<HTMLInputElement>).uploadFile(filePath);
+      logger.info(`Uploaded file: ${filePath}`);
+
+      // Wait for any file processing
+      await this.waitForPageAndFramesLoad();
+    } catch (error) {
+      throw new Error(
+        `Failed to upload file: ${filePath}. Error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Select all text in an element
+   */
+  async selectTextInElement(elementNode: DOMElementNode): Promise<void> {
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer is not connected');
+    }
+
+    try {
+      const element = await this.locateElement(elementNode);
+      if (!element) {
+        throw new Error(`Element: ${elementNode} not found`);
+      }
+
+      await this._scrollIntoViewIfNeeded(element);
+
+      // Select all text in the element
+      await element.evaluate(el => {
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+          el.select();
+        } else if (el instanceof HTMLElement) {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const selection = window.getSelection();
+          if (selection) {
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        }
+      });
+
+      logger.info('Selected text in element');
+    } catch (error) {
+      throw new Error(
+        `Failed to select text in element: ${elementNode}. Error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Click at specific coordinates
+   */
+  async clickCoordinates(x: number, y: number): Promise<void> {
+    if (!this._puppeteerPage) {
+      await this.attachPuppeteer();
+    }
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer is not connected');
+    }
+    await this._puppeteerPage.mouse.click(x, y);
+    logger.info(`Clicked at coordinates: ${x}, ${y}`);
+  }
+
+  /**
+   * Hover at specific coordinates
+   */
+  async hoverCoordinates(x: number, y: number): Promise<void> {
+    if (!this._puppeteerPage) {
+      await this.attachPuppeteer();
+    }
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer is not connected');
+    }
+    await this._puppeteerPage.mouse.move(x, y);
+    logger.info(`Hovered at coordinates: ${x}, ${y}`);
+  }
+
+  /**
+   * Check if an element is visible
+   */
+  async isElementVisible(elementNode: DOMElementNode): Promise<boolean> {
+    if (!this._puppeteerPage) {
+      throw new Error('Puppeteer is not connected');
+    }
+
+    try {
+      const element = await this.locateElement(elementNode);
+      if (!element) {
+        return false;
+      }
+
+      const isVisible = await element.evaluate(el => {
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return (
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          style.opacity !== '0' &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      });
+
+      return isVisible;
+    } catch (error) {
+      logger.error(`Failed to check element visibility: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
   getSelectorMap(): Map<number, DOMElementNode> {
     // If there is no cached state, return an empty map
     if (this._cachedState === null) {

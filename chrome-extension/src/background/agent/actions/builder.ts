@@ -22,6 +22,19 @@ import {
   nextPageActionSchema,
   scrollToTopActionSchema,
   scrollToBottomActionSchema,
+  // Phase 1 Enhanced Actions
+  hoverElementActionSchema,
+  doubleClickElementActionSchema,
+  rightClickElementActionSchema,
+  dragAndDropActionSchema,
+  uploadFileActionSchema,
+  pressKeyActionSchema,
+  selectTextActionSchema,
+  assertVisibleActionSchema,
+  assertTextActionSchema,
+  getCookiesActionSchema,
+  setCookieActionSchema,
+  clickCoordinatesActionSchema,
 } from './schemas';
 import { z } from 'zod';
 import { createLogger } from '@src/background/log';
@@ -275,6 +288,28 @@ export class ActionBuilder {
       true,
     );
     actions.push(clickElement);
+
+    const clickCoordinates = new Action(
+      async (input: z.infer<typeof clickCoordinatesActionSchema.schema>) => {
+        const intent = input.intent || `Clicking at coordinates ${input.x}, ${input.y}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+        const page = await this.context.browserContext.getCurrentPage();
+        try {
+          await page.clickCoordinates(input.x, input.y);
+          const msg = `Clicked at coordinates ${input.x}, ${input.y}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+          return new ActionResult({ extractedContent: msg, includeInMemory: true });
+        } catch (error) {
+          const msg = `Failed to click at coordinates ${input.x}, ${input.y}: ${error instanceof Error ? error.message : String(error)}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({ error: msg });
+        }
+      },
+      clickCoordinatesActionSchema,
+      false,
+    );
+    actions.push(clickCoordinates);
 
     const inputText = new Action(
       async (input: z.infer<typeof inputTextActionSchema.schema>) => {
@@ -701,6 +736,372 @@ export class ActionBuilder {
       true,
     );
     actions.push(selectDropdownOption);
+
+    // ============================================
+    // PHASE 1: ENHANCED ACTIONS
+    // ============================================
+
+    // Hover Element Action
+    const hoverElement = new Action(
+      async (input: z.infer<typeof hoverElementActionSchema.schema>) => {
+        const intent = input.intent || `Hovering over element ${input.index}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+        const page = await this.context.browserContext.getCurrentPage();
+        const state = await page.getState();
+
+        const elementNode = state?.selectorMap.get(input.index);
+        if (!elementNode) {
+          throw new Error(t('act_errors_elementNotExist', [input.index.toString()]));
+        }
+
+        try {
+          await page.hoverElementNode(elementNode);
+          // Wait for hover duration
+          if (input.duration && input.duration > 0) {
+            await new Promise(resolve => setTimeout(resolve, input.duration));
+          }
+          const msg = `Hovered over element ${input.index}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+          return new ActionResult({ extractedContent: msg, includeInMemory: true });
+        } catch (error) {
+          const msg = `Failed to hover over element ${input.index}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+      hoverElementActionSchema,
+      true,
+    );
+    actions.push(hoverElement);
+
+    // Double Click Element Action
+    const doubleClickElement = new Action(
+      async (input: z.infer<typeof doubleClickElementActionSchema.schema>) => {
+        const intent = input.intent || `Double-clicking element ${input.index}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+        const page = await this.context.browserContext.getCurrentPage();
+        const state = await page.getState();
+
+        const elementNode = state?.selectorMap.get(input.index);
+        if (!elementNode) {
+          throw new Error(t('act_errors_elementNotExist', [input.index.toString()]));
+        }
+
+        try {
+          await page.doubleClickElementNode(elementNode);
+          const msg = `Double-clicked element ${input.index}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+          return new ActionResult({ extractedContent: msg, includeInMemory: true });
+        } catch (error) {
+          const msg = `Failed to double-click element ${input.index}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+      doubleClickElementActionSchema,
+      true,
+    );
+    actions.push(doubleClickElement);
+
+    // Right Click Element Action
+    const rightClickElement = new Action(
+      async (input: z.infer<typeof rightClickElementActionSchema.schema>) => {
+        const intent = input.intent || `Right-clicking element ${input.index}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+        const page = await this.context.browserContext.getCurrentPage();
+        const state = await page.getState();
+
+        const elementNode = state?.selectorMap.get(input.index);
+        if (!elementNode) {
+          throw new Error(t('act_errors_elementNotExist', [input.index.toString()]));
+        }
+
+        try {
+          await page.rightClickElementNode(elementNode);
+          const msg = `Right-clicked element ${input.index}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+          return new ActionResult({ extractedContent: msg, includeInMemory: true });
+        } catch (error) {
+          const msg = `Failed to right-click element ${input.index}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+      rightClickElementActionSchema,
+      true,
+    );
+    actions.push(rightClickElement);
+
+    // Drag and Drop Action
+    const dragAndDrop = new Action(
+      async (input: z.infer<typeof dragAndDropActionSchema.schema>) => {
+        const intent = input.intent || `Dragging element ${input.sourceIndex} to ${input.targetIndex}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+        const page = await this.context.browserContext.getCurrentPage();
+        const state = await page.getState();
+
+        const sourceNode = state?.selectorMap.get(input.sourceIndex);
+        const targetNode = state?.selectorMap.get(input.targetIndex);
+
+        if (!sourceNode) {
+          throw new Error(t('act_errors_elementNotExist', [input.sourceIndex.toString()]));
+        }
+        if (!targetNode) {
+          throw new Error(t('act_errors_elementNotExist', [input.targetIndex.toString()]));
+        }
+
+        try {
+          await page.dragAndDropElements(sourceNode, targetNode);
+          const msg = `Dragged element ${input.sourceIndex} to element ${input.targetIndex}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+          return new ActionResult({ extractedContent: msg, includeInMemory: true });
+        } catch (error) {
+          const msg = `Failed to drag and drop elements`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+      dragAndDropActionSchema,
+      true,
+    );
+    actions.push(dragAndDrop);
+
+    // Upload File Action
+    const uploadFile = new Action(
+      async (input: z.infer<typeof uploadFileActionSchema.schema>) => {
+        const intent = input.intent || `Uploading file to element ${input.index}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+        const page = await this.context.browserContext.getCurrentPage();
+        const state = await page.getState();
+
+        const elementNode = state?.selectorMap.get(input.index);
+        if (!elementNode) {
+          throw new Error(t('act_errors_elementNotExist', [input.index.toString()]));
+        }
+
+        // Verify it's a file input
+        if (elementNode.tagName?.toLowerCase() !== 'input' || elementNode.attributes?.type !== 'file') {
+          const msg = `Element ${input.index} is not a file input`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({ error: msg });
+        }
+
+        try {
+          await page.uploadFile(elementNode, input.filePath);
+          const msg = `Uploaded file ${input.filePath} to element ${input.index}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+          return new ActionResult({ extractedContent: msg, includeInMemory: true });
+        } catch (error) {
+          const msg = `Failed to upload file`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+      uploadFileActionSchema,
+      true,
+    );
+    actions.push(uploadFile);
+
+    // Press Key Action
+    const pressKey = new Action(async (input: z.infer<typeof pressKeyActionSchema.schema>) => {
+      const modifiersStr = input.modifiers ? input.modifiers.join('+') + '+' : '';
+      const keyCombo = modifiersStr + input.key;
+      const intent = input.intent || `Pressing key: ${keyCombo}`;
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+      const page = await this.context.browserContext.getCurrentPage();
+      try {
+        await page.sendKeys(keyCombo);
+        const msg = `Pressed key: ${keyCombo}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+        return new ActionResult({ extractedContent: msg, includeInMemory: true });
+      } catch (error) {
+        const msg = `Failed to press key: ${keyCombo}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+        return new ActionResult({
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }, pressKeyActionSchema);
+    actions.push(pressKey);
+
+    // Select Text Action
+    const selectText = new Action(
+      async (input: z.infer<typeof selectTextActionSchema.schema>) => {
+        const intent = input.intent || `Selecting text in element ${input.index}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+        const page = await this.context.browserContext.getCurrentPage();
+        const state = await page.getState();
+
+        const elementNode = state?.selectorMap.get(input.index);
+        if (!elementNode) {
+          throw new Error(t('act_errors_elementNotExist', [input.index.toString()]));
+        }
+
+        try {
+          await page.selectTextInElement(elementNode);
+          const msg = `Selected text in element ${input.index}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+          return new ActionResult({ extractedContent: msg, includeInMemory: true });
+        } catch (error) {
+          const msg = `Failed to select text in element ${input.index}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+      selectTextActionSchema,
+      true,
+    );
+    actions.push(selectText);
+
+    // Assert Visible Action
+    const assertVisible = new Action(
+      async (input: z.infer<typeof assertVisibleActionSchema.schema>) => {
+        const intent = input.intent || `Asserting element ${input.index} is visible`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+        const page = await this.context.browserContext.getCurrentPage();
+        const state = await page.getState();
+
+        const elementNode = state?.selectorMap.get(input.index);
+        if (!elementNode) {
+          const msg = `Element ${input.index} does not exist`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({ error: msg, success: false });
+        }
+
+        try {
+          const isVisible = await page.isElementVisible(elementNode);
+          if (isVisible) {
+            const msg = `Element ${input.index} is visible`;
+            this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+            return new ActionResult({ extractedContent: msg, includeInMemory: true, success: true });
+          } else {
+            const msg = `Element ${input.index} is not visible`;
+            this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+            return new ActionResult({ error: msg, success: false });
+          }
+        } catch (error) {
+          const msg = `Failed to check visibility of element ${input.index}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({
+            error: error instanceof Error ? error.message : String(error),
+            success: false,
+          });
+        }
+      },
+      assertVisibleActionSchema,
+      true,
+    );
+    actions.push(assertVisible);
+
+    // Assert Text Action
+    const assertText = new Action(
+      async (input: z.infer<typeof assertTextActionSchema.schema>) => {
+        const intent = input.intent || `Asserting element ${input.index} contains text: ${input.expectedText}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+        const page = await this.context.browserContext.getCurrentPage();
+        const state = await page.getState();
+
+        const elementNode = state?.selectorMap.get(input.index);
+        if (!elementNode) {
+          const msg = `Element ${input.index} does not exist`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({ error: msg, success: false });
+        }
+
+        try {
+          const actualText = elementNode.getAllTextTillNextClickableElement() || '';
+          const matches = input.exact ? actualText === input.expectedText : actualText.includes(input.expectedText);
+
+          if (matches) {
+            const msg = `Element ${input.index} contains expected text`;
+            this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+            return new ActionResult({ extractedContent: msg, includeInMemory: true, success: true });
+          } else {
+            const msg = `Element ${input.index} text mismatch. Expected: "${input.expectedText}", Got: "${actualText}"`;
+            this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+            return new ActionResult({ error: msg, success: false });
+          }
+        } catch (error) {
+          const msg = `Failed to assert text in element ${input.index}`;
+          this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+          return new ActionResult({
+            error: error instanceof Error ? error.message : String(error),
+            success: false,
+          });
+        }
+      },
+      assertTextActionSchema,
+      true,
+    );
+    actions.push(assertText);
+
+    // Get Cookies Action
+    const getCookies = new Action(async (input: z.infer<typeof getCookiesActionSchema.schema>) => {
+      const intent = input.intent || (input.name ? `Getting cookie: ${input.name}` : 'Getting all cookies');
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+      try {
+        const cookies = await this.context.browserContext.getCookies(input.name);
+        const msg = input.name
+          ? `Cookie ${input.name}: ${JSON.stringify(cookies)}`
+          : `All cookies: ${JSON.stringify(cookies)}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+        return new ActionResult({ extractedContent: msg, includeInMemory: true });
+      } catch (error) {
+        const msg = `Failed to get cookies`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+        return new ActionResult({
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }, getCookiesActionSchema);
+    actions.push(getCookies);
+
+    // Set Cookie Action
+    const setCookie = new Action(async (input: z.infer<typeof setCookieActionSchema.schema>) => {
+      const intent = input.intent || `Setting cookie: ${input.name}`;
+      this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_START, intent);
+
+      try {
+        await this.context.browserContext.setCookie({
+          name: input.name,
+          value: input.value,
+          domain: input.domain,
+          path: input.path,
+        });
+        const msg = `Set cookie ${input.name} = ${input.value}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_OK, msg);
+        return new ActionResult({ extractedContent: msg, includeInMemory: true });
+      } catch (error) {
+        const msg = `Failed to set cookie ${input.name}`;
+        this.context.emitEvent(Actors.NAVIGATOR, ExecutionState.ACT_FAIL, msg);
+        return new ActionResult({
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }, setCookieActionSchema);
+    actions.push(setCookie);
 
     return actions;
   }

@@ -74,6 +74,14 @@ The following is one-time information - if you need to remember it write it to m
 Current tab: ${currentTab}
 Other available tabs:
   ${otherTabs.join('\n')}
+
+[DUAL MODALITY SYNC]
+You are provided with BOTH a Screenshot and a DOM Text representation.
+1. USE THE SCREENSHOT as your primary source of truth for "what is happening" (popups, layout, visual state).
+2. USE THE DOM TEXT (Interactive elements below) primarily for finding the *indexes* of the elements you see in the screenshot.
+3. If the DOM says one thing but the Screenshot shows another (e.g., a loading spinner or modal), TRUST THE SCREENSHOT.
+4. If you see a popup in the screenshot that covers elements, deal with the popup first.
+
 Interactive elements from top layer of the current page inside the viewport:
 ${formattedElementsText}
 ${stepInfoDescription}

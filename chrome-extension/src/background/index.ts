@@ -244,6 +244,13 @@ chrome.runtime.onConnect.addListener(port => {
             break;
           }
 
+          case 'approval_response': {
+            if (currentExecutor && message.id !== undefined && message.approved !== undefined) {
+              await currentExecutor.resolveApproval(message.id, message.approved);
+            }
+            break;
+          }
+
           default:
             return port.postMessage({ type: 'error', error: t('errors_cmd_unknown', [message.type]) });
         }

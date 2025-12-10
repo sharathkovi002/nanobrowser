@@ -63,9 +63,9 @@ When determining if a task is "done":
     "observation": "[string type], brief analysis of the current state and what has been done so far",
     "done": "[boolean type], whether the ultimate task is fully completed successfully",
     "challenges": "[string type], list any potential challenges or roadblocks",
-    "next_steps": "[string type], list 2-3 high-level next steps to take (MUST be empty if done=true)",
+    "next_steps": "[string type], list as many detailed next steps as required to make progress (MUST be empty if done=true)",
     "final_answer": "[string type], complete user-friendly answer to the task (MUST be provided when done=true, empty otherwise)",
-    "reasoning": "[string type], explain your reasoning for the suggested next steps or completion decision",
+    "reasoning": "[string type], explain your deep reasoning, analyzing the current state, user intent, and potential pitfalls",
     "web_task": "[boolean type], whether the ultimate task is related to browsing the web"
 }
 
